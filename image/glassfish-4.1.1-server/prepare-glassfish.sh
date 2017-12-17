@@ -70,90 +70,93 @@ chmod u+x /usr/lib/glassfish4/bin/install-master-password.sh
 
 echo '#!/bin/sh
 
-keytool \
--importkeystore \
--srckeystore $1/$2/config/keystore.jks \
--srcalias s2as \
--srcstorepass $3 \
--destkeystore /tmp/$2-keystore.p12 \
--deststoretype PKCS12 \
--deststorepass $3 2> /dev/null
+KEYSTORE_TEMP_PATH=/tmp/keystore-$1
+KEYSTORE_CACERTS_TEMP_PATH=$KEYSTORE_TEMP_PATH/cacerts
+KEYSTORE_CERTS_TEMP_PATH=$KEYSTORE_TEMP_PATH/certs
+KEYSTORE_KEYS_TEMP_PATH=$KEYSTORE_TEMP_PATH/keys
+KEYSTORE_CERTKEYS_TEMP_PATH=$KEYSTORE_TEMP_PATH/certkeys
 
-openssl pkcs12 \
--in /tmp/$2-keystore.p12 \
--passin pass:$3 \
--nokeys \
--out /tmp/$2-cert.pem
+mkdir -p $KEYSTORE_CACERTS_TEMP_PATH
+mkdir -p $KEYSTORE_CERTS_TEMP_PATH
+mkdir -p $KEYSTORE_KEYS_TEMP_PATH
+mkdir -p $KEYSTORE_CERTKEYS_TEMP_PATH
+' > /usr/lib/glassfish4/bin/keystore-update-begin.sh
 
-openssl pkcs12 \
--in /tmp/$2-keystore.p12 \
--passin pass:$3 \
--nocerts \
--nodes \
--out /tmp/$2-key.pem
-
-rm /tmp/$2-keystore.p12
-
-scp -oStrictHostKeyChecking=no \
-/tmp/$2-cert.pem $4@$5:/usr/apache2/lib/cert.pem 2> /dev/null
-rm /tmp/$2-cert.pem
-
-scp -oStrictHostKeyChecking=no \
-/tmp/$2-key.pem $4@$5:/usr/apache2/lib/key.pem 2> /dev/null
-rm /tmp/$2-key.pem
-' > /usr/lib/glassfish4/bin/install-certificates.sh
-
-chown glassfish:glassfish /usr/lib/glassfish4/bin/install-certificates.sh
-chmod u+x /usr/lib/glassfish4/bin/install-certificates.sh
+chown glassfish:glassfish /usr/lib/glassfish4/bin/keystore-update-begin.sh
+chmod u+x /usr/lib/glassfish4/bin/keystore-update-begin.sh
 
 echo '#!/bin/sh
 
 KEYSTORE_TEMP_PATH=/tmp/keystore-$1
-
-mkdir -p $KEYSTORE_TEMP_PATH
-' > /usr/lib/glassfish4/bin/keystore-setup-begin.sh
-
-chown glassfish:glassfish /usr/lib/glassfish4/bin/keystore-setup-begin.sh
-chmod u+x /usr/lib/glassfish4/bin/keystore-setup-begin.sh
-
-echo '#!/bin/sh
-
-KEYSTORE_TEMP_PATH=/tmp/keystore-$1
+KEYSTORE_CACERTS_TEMP_PATH=$KEYSTORE_TEMP_PATH/cacerts
+KEYSTORE_CERTS_TEMP_PATH=$KEYSTORE_TEMP_PATH/certs
+KEYSTORE_KEYS_TEMP_PATH=$KEYSTORE_TEMP_PATH/keys
+KEYSTORE_CERTKEYS_TEMP_PATH=$KEYSTORE_TEMP_PATH/certkeys
 KEYSTORE_PATH=/var/glassfish/domains/$1/config/keystore.jks
 CACERTS_PATH=/var/glassfish/domains/$1/config/cacerts.jks
 
-openssl pkcs12 \
--export \
--name s2as \
--out $KEYSTORE_TEMP_PATH/certkey \
--inkey $KEYSTORE_TEMP_PATH/private-key \
--in $KEYSTORE_TEMP_PATH/subject \
--passout pass:$2
+if [ "$(ls -A $KEYSTORE_CACERTS_TEMP_PATH)" ]
+then
+	for f in $KEYSTORE_CACERTS_TEMP_PATH/*
+	do
+		KEYSTORE_ALIAS=$(basename $f)
+		
+		keytool \
+		-delete \
+		-alias $KEYSTORE_ALIAS \
+		-keystore $CACERTS_PATH \
+		-noprompt \
+		-storepass $2 2> /dev/null
+		
+		keytool \
+		-import \
+		-alias $KEYSTORE_ALIAS \
+		-file $f \
+		-keystore $CACERTS_PATH \
+		-noprompt \
+		-storepass $2 2> /dev/null
+	done
+fi
 
-keytool \
--importkeystore \
--srckeystore $KEYSTORE_TEMP_PATH/certkey \
--srcstoretype PKCS12 \
--srcalias s2as \
--srcstorepass $2 \
--destkeystore $KEYSTORE_PATH \
--deststoretype JKS \
--destalias s2as \
--deststorepass $2 2> /dev/null
-
-keytool \
--import \
--alias s2as \
--file $KEYSTORE_TEMP_PATH/issuer \
--keystore $CACERTS_PATH \
--noprompt \
--storepass $2 2> /dev/null
+if [ "$(ls -A $KEYSTORE_CERTS_TEMP_PATH)" ]
+then
+	for f in $KEYSTORE_CERTS_TEMP_PATH/*
+	do
+		KEYSTORE_ALIAS=$(basename $f)
+		
+		openssl pkcs12 \
+		-export \
+		-name $(basename $f) \
+		-out $KEYSTORE_CERTKEYS_TEMP_PATH/$KEYSTORE_ALIAS \
+		-inkey $KEYSTORE_KEYS_TEMP_PATH/$KEYSTORE_ALIAS \
+		-in $f \
+		-passout pass:$2
+		
+		keytool \
+		-delete \
+		-alias $KEYSTORE_ALIAS \
+		-keystore $KESTORE_PATH \
+		-noprompt \
+		-storepass $2 2> /dev/null
+		
+		keytool \
+		-importkeystore \
+		-srckeystore $KEYSTORE_CERTKEYS_TEMP_PATH/$KEYSTORE_ALIAS \
+		-srcstoretype PKCS12 \
+		-srcalias $KEYSTORE_ALIAS \
+		-srcstorepass $2 \
+		-destkeystore $KEYSTORE_PATH \
+		-deststoretype JKS \
+		-destalias $KEYSTORE_ALIAS \
+		-deststorepass $2 2> /dev/null
+	done
+fi
 
 rm -r $KEYSTORE_TEMP_PATH
-' > /usr/lib/glassfish4/bin/keystore-setup-end.sh
+' > /usr/lib/glassfish4/bin/keystore-update-end.sh
 
-chown glassfish:glassfish /usr/lib/glassfish4/bin/keystore-setup-end.sh
-chmod u+x /usr/lib/glassfish4/bin/keystore-setup-end.sh
+chown glassfish:glassfish /usr/lib/glassfish4/bin/keystore-update-end.sh
+chmod u+x /usr/lib/glassfish4/bin/keystore-update-end.sh
 
 echo '
 [program:glassfish]
